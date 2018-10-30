@@ -11,5 +11,10 @@ module Saltpack
 	REVISION = %q$Revision: e216e8bc10bb $
 
 
+	require 'saltpack/errors'
+
+	autoload :Header, 'saltpack/header'
+	autoload :Recipient, 'saltpack/recipient'
+
 end # module Saltpack
 

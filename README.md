@@ -15,7 +15,9 @@ docs
 
 ## Description
 
+A Ruby implementation of Saltpack, a modern crypto messaging format.
 
+See also: https://saltpack.org/
 
 
 ## Prerequisites

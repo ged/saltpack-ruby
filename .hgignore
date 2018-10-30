@@ -1,1 +1,9 @@
-/html/
+config\.yml$
+doc/
+html/
+pkg/
+spec/\.state
+\.devel$
+\.gem$
+\.lock$
+^ChangeLog$
