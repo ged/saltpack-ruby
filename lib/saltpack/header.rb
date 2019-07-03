@@ -34,6 +34,9 @@ class Saltpack::Header
 	}.freeze
 	MODE_NAMES = MODE_VALUES.invert.freeze
 
+	# The prefix for the nonces used for encrypting payload keys
+	HEADER_PAYLOAD_NONCE_PREFIX = 'saltpack_recipsb'.b
+
 
 	# [
 	#     format name,
@@ -78,6 +81,24 @@ class Saltpack::Header
 		raise Saltpack::MalformedMessage, "error while unpacking: #{err.message}"
 	end
 
+
+	### Generate a header
+	def self::generate( sender_public_key, *recipient_public_keys )
+		payload_key = RbNaCl::Random.random_bytes( RbNaCl::SecretBox.key_bytes )
+		sender_secretbox = RbNaCl::SimpleBox.from_secret_key( payload_key )
+
+		ephemeral_keypair = RbNaCl::PrivateKey.generate
+		recipients = recipient_public_keys.map.with_index do |recipient_key, i|
+			box = RbNaCl::Box.new( recipient_key, ephemeral_keypair )
+			nonce = HEADER_PAYLOAD_NONCE_PREFIX + [i].pack( 'Q>' )
+			encrypted_key = box.encrypt( nonce, payload_key )
+
+			# :TODO: Doesn't handle anonymous recipients
+			[ recipient_key, encrypted_key ]
+		end
+
+		
+	end
 
 
 	### Create a new Header for a saltpack message with the given +ephemeral_key+

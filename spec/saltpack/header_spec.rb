@@ -10,6 +10,11 @@ require 'saltpack'
 
 describe Saltpack::Header do
 
+
+	it "can generate a valid Saltpack header" do
+		header_data = described_class.generate( )
+	end
+
 	it "can be parsed from a string" do
 		hdr = described_class.parse( "" )
 
