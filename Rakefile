@@ -1,5 +1,6 @@
 #!/usr/bin/env rake
 
+
 begin
 	require 'hoe'
 rescue LoadError
@@ -22,7 +23,7 @@ hoespec = Hoe.spec 'saltpack' do |spec|
 	spec.history_file = 'History.md'
 
 	spec.extra_rdoc_files = FileList[ '*.rdoc', '*.md' ]
-	spec.license 'BSD-3-Clause'
+	spec.license 'MIT'
 	spec.urls = {
 		home:   'http://bitbucket.org/ged/saltpack',
 		code:   'http://bitbucket.org/ged/saltpack',
@@ -76,7 +77,7 @@ if File.directory?( '.hg' )
 	    rdoc.main = "README.rdoc"
 		rdoc.markup = 'markdown'
 	    rdoc.rdoc_files.include( "*.rdoc", "ChangeLog", "lib/**/*.rb" )
-	    rdoc.generator = :fivefish
+	    rdoc.generator = :sixfish
 		rdoc.title = 'Saltpack'
 	    rdoc.rdoc_dir = 'doc'
 	end
@@ -97,4 +98,5 @@ end
 CLOBBER.include( GEMSPEC.to_s )
 
 task :default => :gemspec
+
 

@@ -12,6 +12,7 @@ module Saltpack
 	def_exception :Error, "saltpack error"
 
 	def_exception :MalformedMessage, "malformed saltpack message", Saltpack::Error
+	def_exception :HMACError, "HMAC mismatch", Saltpack::Error
 
 	def_exception :UnsupportedFormat, "unrecognized format name", Saltpack::Error
 	def_exception :UnsupportedVersion, "incompatible version", Saltpack::Error
