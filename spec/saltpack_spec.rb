@@ -137,7 +137,7 @@ describe Saltpack do
 		end
 
 
-		it "can decrypt with a secret key" do
+		fit "can decrypt with a secret key" do
 			cyphertext_binary = described_class.dearmor( KEYBASE_TEST_CIPHERTEXT )
 			result = described_class.decrypt( cyphertext_binary, KEYBASE_TEST_SECRET_KEY )
 			expect( result ).to eq( KEYBASE_TEST_PLAINTEXT )

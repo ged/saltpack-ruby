@@ -51,7 +51,7 @@ class Saltpack::Header
 	PAYLOAD_NONCE_PREFIX = "saltpack_ploadsb".b
 
 	# The 32-byte zero string used to create the MAC keys
-	ZEROS_32 = RbNaCl::Utils.zeros( 32 )
+	ZEROS_32 = RbNaCl::Util.zeros( 32 )
 
 
 	# Log to the Saltpack logger
@@ -71,21 +71,25 @@ class Saltpack::Header
 	### Saltpack header and return it as a Saltpack::Header. Raises a
 	### Saltpack::Error if the +source+ cannot be parsed.
 	def self::parse( source, recipient_key )
-		encoded_header = MessagePack.unpack( source )
+		source = StringIO.new( source ) unless source.respond_to?( :read )
+		unpacker = MessagePack::Unpacker.new( source )
+		self.log.debug "Unpacker is: %p" % [ unpacker ]
+
+		encoded_header = unpacker.read
 		header_hash = RbNaCl::Hash.sha512( encoded_header )
 		parts = MessagePack.unpack( encoded_header )
 
 		raise Saltpack::MalformedMessage, "header is not an Array" unless parts.is_a?( Array )
 
+		self.log.debug "Message parts: %p" % [ parts ]
 		format_name, version, mode, ephemeral_pubkey, sender_secretbox, recipient_pairs, _ = *parts
-		version_major, version_minor = *version
+		major_version, minor_version = *version
 
 		raise Saltpack::UnsupportedFormat, format_name unless
 			format_name == FORMAT_NAME
 		raise Saltpack::UnsupportedVersion, "%d.%d" % [major_version, minor_version] unless
 			major_version == FORMAT_MAJOR_VERSION &&
 			minor_version == FORMAT_MINOR_VERSION
-
 
 		# Try to open each of the payload key boxes in the recipients list using
 		# crypto_box_open_afternm, the precomputed secret from #5, and the nonce
@@ -110,12 +114,28 @@ class Saltpack::Header
 		end
 
 	    raise "Failed to extract the payload key" unless payload_key
+		sender_public = RbNaCl::SecretBox.new( payload_key ).
+			decrypt( SENDER_KEY_SECRETBOX_NONCE, sender_secretbox )
 
-		recipient_mac = self.calculate_recipient_hash( header_hash,
-			index, recipient_key.public_key,  )
+		recipient_mac = self.calculate_recipient_hash( header_hash, index,
+			[sender_public, recipient_key],
+			[ephemeral_pubkey, recipient_key]
+		)
 
-	rescue MessagePack::MalformedFormatError => err
-		raise Saltpack::MalformedMessage, "error while unpacking: #{err.message}"
+	    self.log.debug "recipient index: %p" % [ recipient_index ]
+	    self.log.debug "sender key: %p" % [ sender_public ]
+	    self.log.debug "payload key: %p" % [ payload_key ]
+	    self.log.debug "mac key: %p" % [ mac_key ]
+
+		output = String.new( encoding: 'binary' )
+
+		unpacker.each_with_index do |chunk, i|
+			self.log.debug "Chunk %d: %p" % [ i, chunk ]
+		end
+
+		return output
+	# rescue MessagePack::MalformedFormatError => err
+	# 	raise Saltpack::MalformedMessage, "error while unpacking: #{err.message}"
 	end
 
 
@@ -174,14 +194,17 @@ class Saltpack::Header
 		# After generating the header, the sender computes each recipient's MAC key,
 		# which will be used below to authenticate the payload:
 		recipient_mac_keys = recipient_public_keys.map.with_index do |recipient_key, i|
-			self.calculate_recipient_hash( header_hash, i, recipient_key, sender_key, ephemeral_key )
+			self.calculate_recipient_hash( header_hash, i,
+				[recipient_key, sender_key],
+				[recipient_key, ephemeral_key]
+			)
 		end
 
 	end
 
 
 	### Calculate a MAC hash for the 
-	def self::calculate_recipient_hash( header_hash, index, recipient_key, sender_key, ephemeral_key )
+	def self::calculate_recipient_hash( header_hash, index, keypair1, keypair2 )
 		mac_key_nonce_prefix = header_hash[0, 16]
 
 		# 9. Concatenate the first 16 bytes of the header hash from step 7 above, with the
@@ -202,8 +225,8 @@ class Saltpack::Header
 		# sender's long-term private key, and the nonce from the previous step.
 		# Encrypt 32 zero bytes again, as in step 11, but using the ephemeral private
 		# key rather than the sender's long term private key.
-		box1 = RbNaCl::Box.new( recipient_key, sender_key ).encrypt( nonce1, ZEROS_32 )
-		box2 = RbNaCl::Box.new( recipient_key, ephemeral_keypair ).encrypt( nonce2, ZEROS_32 )
+		box1 = RbNaCl::Box.new( *keypair1 ).encrypt( nonce1, ZEROS_32 )
+		box2 = RbNaCl::Box.new( *keypair2 ).encrypt( nonce2, ZEROS_32 )
 
 		# Concatenate the last 32 bytes each box from steps 11 and 13. Take the SHA512
 		# hash of that concatenation. The recipient's MAC Key is the first 32 bytes of

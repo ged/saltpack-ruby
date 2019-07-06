@@ -103,6 +103,12 @@ module Saltpack
 	end
 
 
+	### (Undocumented)
+	def decrypt( message, recipient_key )
+		Saltpack::Header.parse( message, recipient_key )
+	end
+
+
 	### Return the +input_bytes+ ascii-armored using the specified +options+
 	def armor( input, **options )
 		options = Saltpack::DEFAULT_ARMOR_OPTIONS.merge( options )
@@ -194,16 +200,12 @@ module Saltpack
 	    # Convert the chars to an integer.
 	    bytes_int = Saltpack.get_char_index( alphabet, chars_block[0] )
 		chars_block[ 1.. ].chars.each do |char|
-			self.log.debug "Bytes int: %p" % [ bytes_int ]
 	        bytes_int *= alphabet.length
-			self.log.debug "Bytes int: %p" % [ bytes_int ]
 	        bytes_int += Saltpack.get_char_index( alphabet, char )
 		end
-		self.log.debug "Bytes int: %p" % [ bytes_int ]
 
 	    # Shift right by the extra bits.
 	    bytes_int >>= extra if shift
-		self.log.debug "Bytes int after shifting: %p" % [ bytes_int ]
 
 		return [ bytes_int.to_s(16) ].pack( 'H*' )
 	end
