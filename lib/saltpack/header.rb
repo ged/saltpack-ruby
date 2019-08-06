@@ -71,7 +71,8 @@ class Saltpack::Header
 	### Saltpack header and return it as a Saltpack::Header. Raises a
 	### Saltpack::Error if the +source+ cannot be parsed.
 	def self::parse( source, recipient_key )
-		source = StringIO.new( source ) unless source.respond_to?( :read )
+		source = StringIO.new( source ) unless
+			source.respond_to?( :read ) || source.respond_to?( :readpartial )
 		unpacker = MessagePack::Unpacker.new( source )
 		self.log.debug "Unpacker is: %p" % [ unpacker ]
 
@@ -81,61 +82,7 @@ class Saltpack::Header
 
 		raise Saltpack::MalformedMessage, "header is not an Array" unless parts.is_a?( Array )
 
-		self.log.debug "Message parts: %p" % [ parts ]
-		format_name, version, mode, ephemeral_pubkey, sender_secretbox, recipient_pairs, _ = *parts
-		major_version, minor_version = *version
-
-		raise Saltpack::UnsupportedFormat, format_name unless
-			format_name == FORMAT_NAME
-		raise Saltpack::UnsupportedVersion, "%d.%d" % [major_version, minor_version] unless
-			major_version == FORMAT_MAJOR_VERSION &&
-			minor_version == FORMAT_MINOR_VERSION
-
-		# Try to open each of the payload key boxes in the recipients list using
-		# crypto_box_open_afternm, the precomputed secret from #5, and the nonce
-		# saltpack_recipsbXXXXXXXX. XXXXXXXX is 8-byte big-endian unsigned recipient
-		# index, where the first recipient is index 0. Successfully opening one gives
-		# the payload key.
-		if ( recipient = recipients.assoc(recipient_key.public_key) )
-			index = recipients.index( recipient ) or
-				raise "Recipient %p not present in the recipients list?!"
-			nonce = PAYLOAD_KEY_BOX_NONCE_PREFIX + [index].pack( 'Q>' )
-			box = RbNaCl::Box.new( ephemeral_pubkey, recipient_key )
-			payload_key = box.decrypt( nonce, recipient[1] )
-		else
-			ephemeral_beforenm = RbNaCl::Box.beforenm( ephemeral_pubkey, recipient_key ) or
-				raise "Failed to extract the ephemeral shared key."
-			recipients.each_with_index do |(_, encrypted_key), index|
-				nonce = PAYLOAD_KEY_BOX_NONCE_PREFIX + [index].pack( 'Q>' )
-				payload_key = RbNaCl::Box.open_afternm( encrypted_key,
-					ephemeral_beforenm, nonce, RbNaCl::SecretBox.key_bytes )
-				break if payload_key
-			end
-		end
-
-	    raise "Failed to extract the payload key" unless payload_key
-		sender_public = RbNaCl::SecretBox.new( payload_key ).
-			decrypt( SENDER_KEY_SECRETBOX_NONCE, sender_secretbox )
-
-		recipient_mac = self.calculate_recipient_hash( header_hash, index,
-			[sender_public, recipient_key],
-			[ephemeral_pubkey, recipient_key]
-		)
-
-	    self.log.debug "recipient index: %p" % [ recipient_index ]
-	    self.log.debug "sender key: %p" % [ sender_public ]
-	    self.log.debug "payload key: %p" % [ payload_key ]
-	    self.log.debug "mac key: %p" % [ mac_key ]
-
-		output = String.new( encoding: 'binary' )
-
-		unpacker.each_with_index do |chunk, i|
-			self.log.debug "Chunk %d: %p" % [ i, chunk ]
-		end
-
-		return output
-	# rescue MessagePack::MalformedFormatError => err
-	# 	raise Saltpack::MalformedMessage, "error while unpacking: #{err.message}"
+		return new( *parts, header_hash: header_hash )
 	end
 
 
@@ -176,6 +123,7 @@ class Saltpack::Header
 			FORMAT_NAME,
 			[ FORMAT_MAJOR_VERSION, FORMAT_MINOR_VERSION ],
 			MODES[:encryption],
+			ephemeral_key.public_key,
 			sender_secretbox,
 			recipients,
 		]
@@ -234,6 +182,21 @@ class Saltpack::Header
 		mac_hash = RbNaCl::Hash.sha512( box1[-16..] + box2[-16..] )
 
 		return mac_hash[ 0, 32 ]
+	end
+
+
+	### (Undocumented)
+	def initialize( format_name, version, mode=MODES[:encryption], ephemeral_pubkey, sender_secretbox, *recipient_pairs, header_hash: nil )
+		raise Saltpack::UnsupportedFormat, format_name unless
+			format_name == FORMAT_NAME
+		raise Saltpack::UnsupportedVersion, "%d.%d" % [version.map(&:to_s).join('.')] unless
+			version == FORMAT_VERSION
+
+		@mode = mode
+		@ephemeral_pubkey = ephemeral_pukey
+		@sender_secretbox = sender_secretbox
+		@recipients = recipient_pairs
+		@header_hash = header_hash
 	end
 
 
