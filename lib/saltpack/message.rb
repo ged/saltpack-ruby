@@ -21,7 +21,7 @@ class Saltpack::Message
 
 	### Read a Saltpack::Message from the given +io+ and return it.
 	def self::read( source, recipient_key )
-		header = Saltpack::Header.parse( source )
+		header = Saltpack::Header.parse( source, recipient_key )
 		self.log.debug( header )
 
 		# Try to open each of the payload key boxes in the recipients list using
@@ -50,7 +50,7 @@ class Saltpack::Message
 		sender_public = RbNaCl::SecretBox.new( payload_key ).
 			decrypt( SENDER_KEY_SECRETBOX_NONCE, sender_secretbox )
 
-		recipient_mac = self.calculate_recipient_hash( header_hash, index,
+		recipient_mac = Saltpack.calculate_recipient_hash( header_hash, index,
 			[sender_public, recipient_key],
 			[ephemeral_pubkey, recipient_key]
 		)

@@ -49,7 +49,7 @@ module Saltpack
 
 	### Decrypt the given +message+ with the specified +recipient_key+.
 	def self::decrypt( message, recipient_key )
-		msg = Saltpack::Message.parse( message, recipient_key )
+		msg = Saltpack::Message.read( message, recipient_key )
 		return msg.decrypt
 	end
 
@@ -64,6 +64,45 @@ module Saltpack
 	### the given +options+.
 	def self::dearmor( input_chars, **options )
 		return Saltpack::Armor.dearmor( input_chars, **options )
+	end
+
+
+	#
+	# Utility functions
+	#
+
+
+	### Calculate a MAC hash for the 
+	def self::calculate_recipient_hash( header_hash, index, keypair1, keypair2 )
+
+		# 9. Concatenate the first 16 bytes of the header hash from step 7 above, with the
+		# recipient index from step 4 above. This is the basis of each recipient's MAC
+		# nonce.
+		mac_key_nonce_prefix = header_hash[0, 16]
+		basis = mac_key_nonce_prefix + [i].pack('Q>')
+
+		# Clear the least significant bit of byte 15. That is: nonce[15] &= 0xfe.
+		nonce1 = basis.dup
+		nonce1[15] = (nonce1[15].ord & 0xfe).chr
+
+		# Modify the nonce from step 10 by setting the least significant bit of byte
+		# That is: nonce[15] |= 0x01.
+		nonce2 = basis.dup
+		nonce2[15] = (nonce2[15].ord | 0x01).chr
+
+		# Encrypt 32 zero bytes using crypto_box with the recipient's public key, the
+		# sender's long-term private key, and the nonce from the previous step.
+		# Encrypt 32 zero bytes again, as in step 11, but using the ephemeral private
+		# key rather than the sender's long term private key.
+		box1 = RbNaCl::Box.new( *keypair1 ).encrypt( nonce1, ZEROS_32 )
+		box2 = RbNaCl::Box.new( *keypair2 ).encrypt( nonce2, ZEROS_32 )
+
+		# Concatenate the last 32 bytes each box from steps 11 and 13. Take the SHA512
+		# hash of that concatenation. The recipient's MAC Key is the first 32 bytes of
+		# that hash.
+		mac_hash = RbNaCl::Hash.sha512( box1[-16..] + box2[-16..] )
+
+		return mac_hash[ 0, 32 ]
 	end
 
 end # module Saltpack

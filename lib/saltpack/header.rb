@@ -81,6 +81,10 @@ class Saltpack::Header
 		parts = MessagePack.unpack( encoded_header )
 
 		raise Saltpack::MalformedMessage, "header is not an Array" unless parts.is_a?( Array )
+		raise Saltpack::UnsupportedFormat, parts[0] unless
+			parts[0] == FORMAT_NAME
+		raise Saltpack::UnsupportedVersion, parts[1] unless
+			parts[1] == FORMAT_VERSION
 
 		return new( *parts, header_hash: header_hash )
 	end
@@ -88,31 +92,49 @@ class Saltpack::Header
 
 	### Generate a header
 	def self::generate( sender_key, *recipient_public_keys, hide_recipients: false )
+
+
+	end
+
+
+	### Create a new header with the given 
+	def initialize( **fields )
+		@format_name      = FORMAT_NAME
+		@format_version   = FORMAT_VERSION
+
+		@mode             = :encryption
+
+		@payload_key      = RbNaCl::Random.random_bytes( RbNaCl::SecretBox.key_bytes )
+		@ephemeral_key    = RbNaCl::PrivateKey.generate
+		@sender_key       = nil
+
+		@recipients       = []
+	end
+
+
+
+	### (Undocumented)
+	def to_s
 		result = String.new( encoding: 'binary' )
 
 		# 1. Generate a random 32-byte payload key
-		payload_key = RbNaCl::Random.random_bytes( RbNaCl::SecretBox.key_bytes )
-
 		# 2. Generate a random ephemeral keypair
-		ephemeral_key = RbNaCl::PrivateKey.generate
-
 		# 3. Encrypt the sender's long-term public key using crypto_secretbox with the
-		# payload key and the nonce saltpack_sender_key_sbox, to create the sender
-		# secretbox.
-		sender_public = sender_key.public_key
-		box = RbNaCl::SecretBox.new( payload_key )
-		sender_secretbox = box.encrypt( SENDER_KEY_SECRETBOX_NONCE, sender_public )
+		#    payload key and the nonce saltpack_sender_key_sbox, to create the sender
+		#    secretbox.
+		box = RbNaCl::SecretBox.new( self.payload_key )
+		sender_secretbox = box.encrypt( SENDER_KEY_SECRETBOX_NONCE, self.sender_key.public_key )
 
 		# 4. For each recipient, encrypt the payload key using crypto_box with the
-		# recipient's public key, the ephemeral private key, and the nonce
-		# saltpack_recipsbXXXXXXXX. XXXXXXXX is 8-byte big-endian unsigned recipient
-		# index, where the first recipient is index zero. Pair these with the
-		# recipients' public keys, or null for anonymous recipients, and collect the
-		# pairs into the recipients list.
-		recipients = recipient_public_keys.map.with_index do |recipient_key, i|
+		#    recipient's public key, the ephemeral private key, and the nonce
+		#    saltpack_recipsbXXXXXXXX. XXXXXXXX is 8-byte big-endian unsigned recipient
+		#    index, where the first recipient is index zero. Pair these with the
+		#    recipients' public keys, or null for anonymous recipients, and collect the
+		#    pairs into the recipients list.
+		recipients = self.recipient_public_keys.map.with_index do |recipient_key, i|
 			box = RbNaCl::Box.new( recipient_key, ephemeral_key )
 			nonce = PAYLOAD_KEY_BOX_NONCE_PREFIX + [i].pack( 'Q>' )
-			encrypted_key = box.encrypt( nonce, payload_key )
+			encrypted_key = box.encrypt( nonce, self.payload_key )
 
 			[ hide_recipients ? nil : recipient_key, encrypted_key ]
 		end
@@ -142,63 +164,12 @@ class Saltpack::Header
 		# After generating the header, the sender computes each recipient's MAC key,
 		# which will be used below to authenticate the payload:
 		recipient_mac_keys = recipient_public_keys.map.with_index do |recipient_key, i|
-			self.calculate_recipient_hash( header_hash, i,
-				[recipient_key, sender_key],
+			Saltpack.calculate_recipient_hash( header_hash, i,
+				[recipient_key, self.sender_key],
 				[recipient_key, ephemeral_key]
 			)
 		end
-
 	end
-
-
-	### Calculate a MAC hash for the 
-	def self::calculate_recipient_hash( header_hash, index, keypair1, keypair2 )
-		mac_key_nonce_prefix = header_hash[0, 16]
-
-		# 9. Concatenate the first 16 bytes of the header hash from step 7 above, with the
-		# recipient index from step 4 above. This is the basis of each recipient's MAC
-		# nonce.
-		basis = mac_key_nonce_prefix + [i].pack('Q>')
-
-		# Clear the least significant bit of byte 15. That is: nonce[15] &= 0xfe.
-		nonce1 = basis.dup
-		nonce1[15] = (nonce1[15].ord & 0xfe).chr
-
-		# Modify the nonce from step 10 by setting the least significant bit of byte
-		# That is: nonce[15] |= 0x01.
-		nonce2 = basis.dup
-		nonce2[15] = (nonce2[15].ord | 0x01).chr
-
-		# Encrypt 32 zero bytes using crypto_box with the recipient's public key, the
-		# sender's long-term private key, and the nonce from the previous step.
-		# Encrypt 32 zero bytes again, as in step 11, but using the ephemeral private
-		# key rather than the sender's long term private key.
-		box1 = RbNaCl::Box.new( *keypair1 ).encrypt( nonce1, ZEROS_32 )
-		box2 = RbNaCl::Box.new( *keypair2 ).encrypt( nonce2, ZEROS_32 )
-
-		# Concatenate the last 32 bytes each box from steps 11 and 13. Take the SHA512
-		# hash of that concatenation. The recipient's MAC Key is the first 32 bytes of
-		# that hash.
-		mac_hash = RbNaCl::Hash.sha512( box1[-16..] + box2[-16..] )
-
-		return mac_hash[ 0, 32 ]
-	end
-
-
-	### (Undocumented)
-	def initialize( format_name, version, mode=MODES[:encryption], ephemeral_pubkey, sender_secretbox, *recipient_pairs, header_hash: nil )
-		raise Saltpack::UnsupportedFormat, format_name unless
-			format_name == FORMAT_NAME
-		raise Saltpack::UnsupportedVersion, "%d.%d" % [version.map(&:to_s).join('.')] unless
-			version == FORMAT_VERSION
-
-		@mode = mode
-		@ephemeral_pubkey = ephemeral_pukey
-		@sender_secretbox = sender_secretbox
-		@recipients = recipient_pairs
-		@header_hash = header_hash
-	end
-
 
 end # class Saltpack::Header
 
