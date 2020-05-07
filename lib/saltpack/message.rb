@@ -19,7 +19,8 @@ class Saltpack::Message
 	log_to :saltpack
 
 
-	### Read a Saltpack::Message from the given +io+ and return it.
+	### Read a Saltpack::Message from the given +source+ and +recipient_key+ and
+	### return it.
 	def self::read( source, recipient_key )
 		header = Saltpack::Header.parse( source, recipient_key )
 		self.log.debug( header )
@@ -39,7 +40,7 @@ class Saltpack::Message
 			ephemeral_beforenm = RbNaCl::Box.beforenm( ephemeral_pubkey, recipient_key ) or
 				raise "Failed to extract the ephemeral shared key."
 			recipients.each_with_index do |(_, encrypted_key), index|
-				nonce = PAYLOAD_KEY_BOX_NONCE_PREFIX + [index].pack( 'Q>' )
+				nonce = self.payload_key_nonce( header.version, index )
 				payload_key = RbNaCl::Box.open_afternm( encrypted_key,
 					ephemeral_beforenm, nonce, RbNaCl::SecretBox.key_bytes )
 				break if payload_key
@@ -59,14 +60,42 @@ class Saltpack::Message
 	    self.log.debug "sender key: %p" % [ sender_public ]
 	    self.log.debug "payload key: %p" % [ payload_key ]
 	    self.log.debug "mac key: %p" % [ mac_key ]
-		
 	end
 
 
+	### (Undocumented)
+	def self::payload_key_nonce( version, index )
+
+		return PAYLOAD_KEY_BOX_NONCE_PREFIX + [index].pack( 'Q>' )
+	end
+
 	### Create a new Message for the given +recipients+ using the specified
 	### +sender_key+.
-	def initialize( data, sender_key, *recipients, **options )
-		
+	def initialize( data, header=nil, from: nil, to: [], **options )
+		@data       = readable_source( data )
+		@header     = header
+		@sender_key = from
+		@recipients = to
+		@options    = options
+	end
+
+
+	### (Undocumented)
+	def decrypt
+
+	end
+
+
+	#######
+	private
+	#######
+
+	### Convert the given +data+ source into an object that supports #read or #readpartial if it
+	### isn't already one.
+	def readable_source( data )
+		return data if data.respond_to?( :read ) || data.respond_to?( :readpartial )
+		return StringIO.new( data ) if data.respond_to?( :to_str )
+		raise ArgumentError, "don't know how to read from a %p" % [ data.class ]
 	end
 
 end # class Saltpack::Message

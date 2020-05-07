@@ -50,9 +50,6 @@ class Saltpack::Header
 	# The nonce prefix used for the payload packets
 	PAYLOAD_NONCE_PREFIX = "saltpack_ploadsb".b
 
-	# The 32-byte zero string used to create the MAC keys
-	ZEROS_32 = RbNaCl::Util.zeros( 32 )
-
 
 	# Log to the Saltpack logger
 	log_to :saltpack
@@ -87,6 +84,9 @@ class Saltpack::Header
 			parts[1] == FORMAT_VERSION
 
 		return new( *parts, header_hash: header_hash )
+	rescue MessagePack::MalformedFormatError => err
+		self.log.error "%p while parsing the header: %s" % [ err.class, err.message ]
+		raise Saltpack::MalformedMessage, "malformed msgpack data: %s" % [ err.message ]
 	end
 
 
@@ -97,78 +97,202 @@ class Saltpack::Header
 	end
 
 
-	### Create a new header with the given 
+	### Create a new header with the given
 	def initialize( **fields )
-		@format_name      = FORMAT_NAME
-		@format_version   = FORMAT_VERSION
+		@format_name        = FORMAT_NAME
+		@format_version     = FORMAT_VERSION
 
-		@mode             = :encryption
+		@mode               = :encryption
 
-		@payload_key      = RbNaCl::Random.random_bytes( RbNaCl::SecretBox.key_bytes )
-		@ephemeral_key    = RbNaCl::PrivateKey.generate
-		@sender_key       = nil
+		@payload_key        = RbNaCl::Random.random_bytes( RbNaCl::SecretBox.key_bytes )
+		@ephemeral_key      = RbNaCl::PrivateKey.generate
+		@sender_key         = nil
 
-		@recipients       = []
+		@recipients         = []
+		@hide_recipients    = true
+
+		@recipient_mac_keys = nil
+		@hash               = nil
+		@data               = nil
+
+		fields.each do |name, value|
+			self.public_send( "#{name}=", value )
+		end
 	end
 
 
+	######
+	public
+	######
 
-	### (Undocumented)
-	def to_s
-		result = String.new( encoding: 'binary' )
+	##
+	# The format name used in the header
+	attr_reader :format_name
 
-		# 1. Generate a random 32-byte payload key
-		# 2. Generate a random ephemeral keypair
-		# 3. Encrypt the sender's long-term public key using crypto_secretbox with the
-		#    payload key and the nonce saltpack_sender_key_sbox, to create the sender
-		#    secretbox.
-		box = RbNaCl::SecretBox.new( self.payload_key )
-		sender_secretbox = box.encrypt( SENDER_KEY_SECRETBOX_NONCE, self.sender_key.public_key )
+	##
+	# The [major, minor] version tuple used in the header
+	attr_reader :format_version
 
+	##
+	# The mode being used; one of the keys of MODES
+	attr_reader :mode
+
+	##
+	# The random payload key
+	attr_accessor :payload_key
+
+	##
+	# The RbNaCl::PrivateKey used only for this message to encrypt/sign its
+	# internals
+	attr_accessor :ephemeral_key
+
+	##
+	# The RbNaCl::PrivateKey/PublicKey of the sender
+	attr_accessor :sender_key
+
+	##
+	# The public keys of each of the message's recipients.
+	attr_reader :recipients
+
+	##
+	# Whether to include the recipients' public key in the recipients tuples of the
+	# message.
+	attr_accessor :hide_recipients
+
+
+	### Set the mode as either a Symbol or as an Integer.
+	def mode=( new_mode )
+		if MODES.key?( new_mode )
+			@mode = new_mode
+		elsif MODE_NAMES.key?( new_mode )
+			@mode = MODE_NAMES[ new_mode ]
+		else
+			raise ArgumentError, "invalid mode %p" % [ new_mode ]
+		end
+	end
+
+
+	### Return the mode as an Integer.
+	def numeric_mode
+		return MODES[ self.mode ]
+	end
+
+
+	### Return the #sender_key after checking to be sure the PrivateKey is
+	### available.
+	def sender_private_key
+		key = self.sender_key or raise Saltpack::KeyError, "sender key is not set"
+		raise Saltpack::KeyError, "sender private key not available" unless
+			key && key.respond_to?( :public_key )
+		return key
+	end
+
+
+	### Return either the #sender_key, or the public half of the #send_key if it's a
+	### PrivateKey.
+	def sender_public_key
+		key = self.sender_key or raise Saltpack::KeyError, "sender key is not set"
+		return key.public_key if key.respond_to?( :public_key )
+		return key
+	end
+
+
+	### Calculate all the header values and freeze it.
+	def finalize
+		return if self.frozen?
+
+		# 5. Collect the format name, version, and mode into a list, followed by the
+		# ephemeral public key, the sender secretbox, and the nested recipients list.
+		header_parts = [
+			self.format_name,
+			self.format_version,
+			self.numeric_mode,
+			self.ephemeral_key.public_key.to_bytes,
+			self.sender_secretbox,
+			self.recipient_tuples( hide_recipients: self.hide_recipients ),
+		]
+
+		# 6. Serialize the list from #5 into a MessagePack array object.
+		header_bytes = MessagePack.pack( header_parts )
+
+		# 7. Take the crypto_hash (SHA512) of the bytes from #6. This is the header hash.
+		@hash = RbNaCl::Hash.sha512( header_bytes )
+
+		# 8. Serialize the bytes from #6 again into a MessagePack bin object. These
+		# twice-encoded bytes are the header packet.
+		@data = MessagePack.pack( header_bytes )
+
+		# After generating the header, the sender computes each recipient's MAC key,
+		# which will be used below to authenticate the payload:
+		@recipient_mac_keys = self.recipients.map.with_index do |recipient_key, i|
+			Saltpack.calculate_recipient_hash(
+				@hash, i,
+				[recipient_key, self.sender_private_key],
+				[recipient_key, self.ephemeral_key]
+			)
+		end
+
+		self.freeze
+	end
+
+
+	### Overloaded -- also freeze the recipients when the header is frozen.
+	def freeze
+		@recipients.freeze
+		super
+	end
+
+
+	### Return the SHA612 hash of the single-messagepacked header.
+	def hash
+		self.finalize
+		return @hash
+	end
+
+
+	### Return the header as a binary String.
+	def data
+		self.finalize
+		return @data
+	end
+	alias_method :to_s, :data
+
+
+	### The MAC keys used to hash/validate message parts.
+	def recipient_mac_keys
+		self.finalize
+		return @recipient_mac_keys
+	end
+
+
+	### Generate an Array of header tuples from the #recipients keys and return it.
+	### If +hide_recipients+ is true, don't include the public keys in the tuples.
+	def recipient_tuples( hide_recipients: true )
 		# 4. For each recipient, encrypt the payload key using crypto_box with the
 		#    recipient's public key, the ephemeral private key, and the nonce
 		#    saltpack_recipsbXXXXXXXX. XXXXXXXX is 8-byte big-endian unsigned recipient
 		#    index, where the first recipient is index zero. Pair these with the
 		#    recipients' public keys, or null for anonymous recipients, and collect the
 		#    pairs into the recipients list.
-		recipients = self.recipient_public_keys.map.with_index do |recipient_key, i|
-			box = RbNaCl::Box.new( recipient_key, ephemeral_key )
-			nonce = PAYLOAD_KEY_BOX_NONCE_PREFIX + [i].pack( 'Q>' )
+		return self.recipients.map.with_index do |recipient_key, i|
+			box = RbNaCl::Box.new( recipient_key, self.ephemeral_key )
+			nonce = PAYLOAD_KEY_BOX_NONCE_PREFIX + [ i ].pack( 'Q>' )
 			encrypted_key = box.encrypt( nonce, self.payload_key )
 
 			[ hide_recipients ? nil : recipient_key, encrypted_key ]
 		end
+	end
 
-		# 5. Collect the format name, version, and mode into a list, followed by the
-		# ephemeral public key, the sender secretbox, and the nested recipients list.
-		header = [
-			FORMAT_NAME,
-			[ FORMAT_MAJOR_VERSION, FORMAT_MINOR_VERSION ],
-			MODES[:encryption],
-			ephemeral_key.public_key,
-			sender_secretbox,
-			recipients,
-		]
 
-		# 6. Serialize the list from #5 into a MessagePack array object.
-		header_bytes = MessagePack.pack( header )
-
-		# 7. Take the crypto_hash (SHA512) of the bytes from #6. This is the header hash.
-		header_hash = RbNaCl::Hash.sha512( header_bytes )
-
-		# 8. Serialize the bytes from #6 again into a MessagePack bin object. These
-		# twice-encoded bytes are the header packet.
-		dblenc_header_bytes = MessagePack.pack( header_bytes )
-		result << dblenc_header_bytes
-
-		# After generating the header, the sender computes each recipient's MAC key,
-		# which will be used below to authenticate the payload:
-		recipient_mac_keys = recipient_public_keys.map.with_index do |recipient_key, i|
-			Saltpack.calculate_recipient_hash( header_hash, i,
-				[recipient_key, self.sender_key],
-				[recipient_key, ephemeral_key]
-			)
-		end
+	### Return the sender secretbox
+	def sender_secretbox
+		# 1. Generate a random 32-byte payload key
+		# 2. Generate a random ephemeral keypair
+		# 3. Encrypt the sender's long-term public key using crypto_secretbox with the
+		#    payload key and the nonce saltpack_sender_key_sbox, to create the sender
+		#    secretbox.
+		box = RbNaCl::SecretBox.new( self.payload_key )
+		return box.encrypt( SENDER_KEY_SECRETBOX_NONCE, self.sender_public_key )
 	end
 
 end # class Saltpack::Header

@@ -1,13 +1,13 @@
 # Saltpack
 
 home
-: http://bitbucket.org/ged/saltpack-ruby
+: https://hg.sr.ht/~ged/Saltpack
 
 github
 : https://github.com/ged/saltpack-ruby
 
 docs
-: http://deveiate.org/code/saltpack
+: https://deveiate.org/code/saltpack
 
 
 ## Description
@@ -35,10 +35,16 @@ You can check out the current development source with Mercurial via its
 
 After checking out the source, run:
 
-    $ rake newb
+    $ gem install -Ng
+    $ rake setup
 
-This task will install any missing dependencies, run the tests/specs,
-and generate the API documentation.
+This task will install any missing dependencies and do any necessary developer
+setup.
+
+
+## Authors
+
+- Michael Granger <ged@faeriemud.org>
 
 
 ## License
@@ -78,6 +84,6 @@ And is also distributed under the terms of the MIT license.
 
 
 [NaCl]: https://nacl.cr.yp.to/
-[saltpack-ruby]: http://bitbucket.org/ged/saltpack-ruby
+[saltpack-ruby]: https://hg.sr.ht/~ged/Saltpack
 [github-mirror]: https://github.com/ged/saltpack-ruby
 [saltpack-python]: https://github.com/keybase/saltpack-python

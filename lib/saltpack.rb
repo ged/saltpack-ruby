@@ -25,6 +25,9 @@ module Saltpack
 		visible_recipients: false,
 	}
 
+	# The 32-byte zero string used to create the recipient hashes/MAC keys
+	ZEROS_32 = RbNaCl::Util.zeros( 32 )
+
 
 	# Create a logger for this library
 	log_as :saltpack
@@ -71,15 +74,15 @@ module Saltpack
 	# Utility functions
 	#
 
-
-	### Calculate a MAC hash for the 
+	### Calculate a MAC hash for the recipient at the given +index+ given the specified
+	### +header_hash+, and the two keypairs.
 	def self::calculate_recipient_hash( header_hash, index, keypair1, keypair2 )
 
 		# 9. Concatenate the first 16 bytes of the header hash from step 7 above, with the
 		# recipient index from step 4 above. This is the basis of each recipient's MAC
 		# nonce.
 		mac_key_nonce_prefix = header_hash[0, 16]
-		basis = mac_key_nonce_prefix + [i].pack('Q>')
+		basis = mac_key_nonce_prefix + [ index ].pack('Q>')
 
 		# Clear the least significant bit of byte 15. That is: nonce[15] &= 0xfe.
 		nonce1 = basis.dup

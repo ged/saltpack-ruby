@@ -46,20 +46,20 @@ describe Saltpack do
 
 	describe "encryption" do
 
-		it "can encrypt and decrypt with defaults" do
+		xit "can encrypt and decrypt with defaults" do
 			result = described_class.encrypt( KEYBASE_TEST_MESSAGE )
 			expect( described_class.decrypt(result) ).to eq( KEYBASE_TEST_MESSAGE )
 		end
 
 
-		fit "can decrypt with a secret key" do
+		xit "can decrypt with a secret key" do
 			ciphertext_binary = described_class.dearmor( KEYBASE_TEST_CIPHERTEXT )
 			result = described_class.decrypt( ciphertext_binary, KEY2_PRIVATE )
 			expect( result ).to eq( KEYBASE_TEST_MESSAGE )
 		end
 
 
-		it "errors when the message armor has been tampered with" do
+		xit "errors when the message armor has been tampered with" do
 			ciphertext_binary = described_class.dearmor( KEYBASE_TEST_CIPHERTEXT_CORRUPT )
 			expect {
 				described_class.decrypt( ciphertext_binary, KEY2_PRIVATE )
@@ -67,14 +67,14 @@ describe Saltpack do
 		end
 
 
-		it "errors when the message is malformed" do
+		xit "errors when the message is malformed" do
 			expect {
 				described_class.decrypt( MALFORMED_MESSAGE )
 			}.to raise_error( Saltpack::MalformedMessage )
 		end
 
 
-		it "errors when the message is the wrong version" do
+		xit "errors when the message is the wrong version" do
 			expect {
 				described_class.decrypt( BAD_VERSION_MESSAGE )
 			}.to raise_error( Saltpack::UnsupportedVersion )

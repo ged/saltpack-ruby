@@ -1,13 +1,12 @@
-source 'https://rubygems.org/'
+source "https://rubygems.org/"
 
-gem 'loggability', "~> 0.15"
-gem 'rbnacl', "~> 7.1"
-gem 'msgpack', "~> 1.3"
+gem 'loggability', '~> 0.14'
+gem 'rbnacl', '~> 5.0'
+gem 'msgpack', '~> 1.2'
 
-group :development do
-	gem 'rake-deveiate', "~> 0.10"
-	gem 'simplecov', "~> 0.18"
-	gem 'rdoc-generator-fivefish', "~> 0.3"
+group( :development ) do
+	gem 'hoe-deveiate', '~> 0.10'
+	gem 'simplecov', '~> 0.7'
+	gem 'rdoc-generator-fivefish', '~> 0.3'
 	gem 'rdoc', "~> 6.2"
 end
-

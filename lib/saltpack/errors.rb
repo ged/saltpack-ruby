@@ -11,6 +11,8 @@ module Saltpack
 
 	def_exception :Error, "saltpack error"
 
+	def_exception :KeyError, "missing/malformed key error"
+
 	def_exception :MalformedMessage, "malformed saltpack message", Saltpack::Error
 	def_exception :HMACError, "HMAC mismatch", Saltpack::Error
 

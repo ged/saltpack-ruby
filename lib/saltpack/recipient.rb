@@ -25,9 +25,9 @@ class Saltpack::Recipient
 	attr_reader :public_key
 
 
-	### 
+	###
 	def payload_key_box
-		
+
 	end
 
 end # class Saltpack::Recipient
